@@ -1,46 +1,272 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Fetch /terms Demo</title>
-</head>
-<body>
-  <h1>Fetch https://mil.psy.ntu.edu.tw:5000/terms</h1>
-  <button id="btn">Fetch again</button>
-  <pre id="out">Loading…</pre>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Neurosynth Frontend — AJAX Demo</title>
 
-  <script>
-    async function fetchTerms() {
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Tailwind Play CDN (可用或不使用，只是提供實用工具類) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+      body { padding-top: 1.5rem; }
+      pre { white-space: pre-wrap; word-break: break-word; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header class="d-flex align-items-center mb-4">
+        <h1 class="h3 me-auto">Neurosynth AJAX Frontend</h1>
+        <small class="text-muted">
+          Backend:
+          <span id="current-backend" class="fw-semibold">https://mil.psy.ntu.edu.tw:5000</span>
+        </small>
+      </header>
+
+      <!-- 通用 fetch 表單（可輸入 base 與 path） -->
+      <div class="card mb-3">
+        <div class="card-body">
+          <form id="fetch-form" class="row g-2 align-items-center">
+            <div class="col-sm-6">
+              <label class="form-label visually-hidden" for="base">Base URL</label>
+              <input id="base" class="form-control" type="url"
+                     value="https://mil.psy.ntu.edu.tw:5000"
+                     placeholder="Base API URL" required />
+            </div>
+
+            <div class="col-sm-4">
+              <label class="form-label visually-hidden" for="path">Path</label>
+              <input id="path" class="form-control" type="text"
+                     value="/terms"
+                     placeholder="Endpoint path (e.g. /terms, /terms/amygdala)" required />
+            </div>
+
+            <div class="col-auto">
+              <button id="fetch-btn" class="btn btn-primary">Fetch</button>
+            </div>
+          </form>
+
+          <!-- 快捷操作列 -->
+          <div class="row mt-3">
+            <div class="col-md-4 mb-2">
+              <button id="btn-terms" class="btn btn-outline-secondary w-100">GET /terms</button>
+            </div>
+
+            <div class="col-md-4 mb-2">
+              <div class="input-group">
+                <input id="term-input" class="form-control" list="terms-list" placeholder="term (t1) e.g. amygdala" />
+                <datalist id="terms-list"></datalist>
+                <button id="btn-term" class="btn btn-outline-secondary">/terms/&lt;t1&gt;</button>
+              </div>
+            </div>
+
+            <div class="col-md-4 mb-2">
+              <div class="input-group">
+                <input id="query-input" class="form-control" placeholder="query string e.g. amygdala not emotion" />
+                <button id="btn-query-studies" class="btn btn-outline-secondary">/query/&lt;q&gt;/studies</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-2 text-muted small">
+            Tip: run this page from a local/static server (not <code>file://</code>) to avoid browser restrictions.
+          </div>
+        </div>
+      </div>
+
+      <!-- 結果卡片 -->
+      <div id="result" class="card">
+        <div class="card-header d-flex align-items-center">
+          <div id="status-badge" class="badge bg-secondary me-2">—</div>
+          <strong id="url-display">Ready</strong>
+          <div class="ms-auto small text-muted">JSON / text preview</div>
+        </div>
+        <div class="card-body">
+          <div id="message" class="mb-2"></div>
+          <pre id="out" class="mono mb-0">No request yet.</pre>
+        </div>
+      </div>
+
+      <footer class="mt-4 small text-muted">
+        <div>
+          CORS note: The backend must allow cross-origin requests from this page.
+          If you see a network error, check CORS or avoid opening via <code>file://</code>.
+        </div>
+      </footer>
+    </div>
+
+    <script>
+      // ===== DOM 參照 =====
+      const form = document.getElementById('fetch-form');
+      const baseInput = document.getElementById('base');
+      const pathInput = document.getElementById('path');
       const out = document.getElementById('out');
-      out.textContent = 'Requesting…';
-      try {
-        const resp = await fetch('https://mil.psy.ntu.edu.tw:5000/terms');
-        let info = `HTTP ${resp.status} ${resp.statusText}\n`;
-        const ct = resp.headers.get('content-type') || '';
+      const statusBadge = document.getElementById('status-badge');
+      const urlDisplay = document.getElementById('url-display');
+      const currentBackend = document.getElementById('current-backend');
+      const msg = document.getElementById('message');
 
-        if (!resp.ok) {
-          const text = await resp.text();
-          out.textContent = info + '\n' + text;
-          return;
-        }
+      const btnTerms = document.getElementById('btn-terms');
+      const btnTerm = document.getElementById('btn-term');
+      const btnQueryStudies = document.getElementById('btn-query-studies');
+      const termInput = document.getElementById('term-input');
+      const queryInput = document.getElementById('query-input');
+      const termsList = document.getElementById('terms-list');
 
-        if (ct.includes('application/json')) {
-          const data = await resp.json();
-          out.textContent = info + '\n' + JSON.stringify(data, null, 2);
-        } else {
-          const text = await resp.text();
-          out.textContent = info + '\n' + text;
-        }
-      } catch (err) {
-        document.getElementById('out').textContent =
-          'Error: ' + (err && err.message ? err.message : String(err)) +
-          '\n\nCommon causes:\n1) CORS not allowed by the server\n2) Opening this file via file:// instead of a local server\n3) Network/server issues';
+      // ===== UI helpers =====
+      function setStatus(code, text, isError = false) {
+        statusBadge.textContent = code ? `${code} ${text || ''}` : '—';
+        statusBadge.className = 'badge ' + (isError ? 'bg-danger' : (code ? 'bg-success' : 'bg-secondary'));
       }
-    }
+      function showError(e) { msg.innerHTML = `<div class="alert alert-danger p-2">${e}</div>`; }
+      function showInfo(t)  { msg.innerHTML = `<div class="alert alert-info p-2">${t}</div>`; }
 
-    document.getElementById('btn').addEventListener('click', fetchTerms);
-    fetchTerms();
-  </script>
-</body>
+      // ===== 基本 fetch =====
+      async function doFetch(event) {
+        if (event) event.preventDefault();
+        const base = baseInput.value.trim();
+        const path = pathInput.value.trim();
+        const url = new URL(path, base).toString();
+
+        currentBackend.textContent = base;
+        urlDisplay.textContent = url;
+        out.textContent = 'Requesting…';
+        setStatus(null, null, false);
+        showInfo('Sending request…');
+
+        try {
+          const resp = await fetch(url, { method: 'GET', mode: 'cors' });
+          setStatus(resp.status, resp.statusText, !resp.ok);
+
+          const ct = resp.headers.get('content-type') || '';
+          if (!resp.ok) {
+            const text = await resp.text();
+            out.textContent = text || `HTTP ${resp.status}`;
+            showError('Server returned an error response. See content below.');
+            return;
+          }
+
+          if (ct.includes('application/json')) {
+            const data = await resp.json();
+            out.textContent = JSON.stringify(data, null, 2);
+            showInfo('Success — JSON response.');
+          } else {
+            const text = await resp.text();
+            out.textContent = text;
+            showInfo('Success — text response.');
+          }
+        } catch (err) {
+          const message = err?.message || String(err);
+          out.textContent = `Error: ${message}`;
+          setStatus('ERR', 'Network/CORS', true);
+          showError(`Request failed: ${message}.<br>Common causes: CORS not allowed, server down, or opening via file://`);
+        }
+      }
+
+      form.addEventListener('submit', doFetch);
+      // 頁面載入時先打一次 /terms
+      window.addEventListener('load', () => setTimeout(() => doFetch(), 50));
+
+      // ===== 快捷按鈕：包一個 fetchJsonAt =====
+      async function fetchJsonAt(path) {
+        const base = baseInput.value.trim();
+        const url = new URL(path, base).toString();
+
+        currentBackend.textContent = base;
+        urlDisplay.textContent = url;
+        out.textContent = 'Requesting…';
+        setStatus(null, null, false);
+        showInfo('Sending request…');
+
+        try {
+          const resp = await fetch(url, { method: 'GET', mode: 'cors' });
+          setStatus(resp.status, resp.statusText, !resp.ok);
+
+          if (!resp.ok) {
+            const text = await resp.text();
+            out.textContent = text || `HTTP ${resp.status}`;
+            showError('Server returned an error response.');
+            return;
+          }
+
+          const ct = resp.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const data = await resp.json();
+            out.textContent = JSON.stringify(data, null, 2);
+            showInfo('Success — JSON response.');
+          } else {
+            const text = await resp.text();
+            out.textContent = text;
+            showInfo('Success — text response.');
+          }
+        } catch (err) {
+          const message = err?.message || String(err);
+          out.textContent = `Error: ${message}`;
+          setStatus('ERR', 'Network/CORS', true);
+          showError(`Request failed: ${message}.<br>Common causes: CORS not allowed, server down, or opening via file://`);
+        }
+      }
+
+      // 快捷按鈕事件
+      btnTerms.addEventListener('click', () => fetchJsonAt('/terms'));
+      btnTerm.addEventListener('click', () => {
+        const t = termInput.value.trim();
+        if (!t) return showError('Please enter a term.');
+        fetchJsonAt(`/terms/${encodeURIComponent(t)}`);
+      });
+      btnQueryStudies.addEventListener('click', () => {
+        const q = queryInput.value.trim();
+        if (!q) return showError('Please enter a query string.');
+        fetchJsonAt(`/query/${encodeURIComponent(q)}/studies`);
+      });
+
+      // Enter 也能觸發
+      termInput.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          btnTerm.click();
+        }
+      });
+      queryInput.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          btnQueryStudies.click();
+        }
+      });
+
+      // ===== 把 /terms 結果塞進 datalist 做自動完成 =====
+      async function populateTermSuggestions() {
+        try {
+          const base = baseInput.value.trim();
+          const url = new URL('/terms', base).toString();
+          const resp = await fetch(url, { method: 'GET', mode: 'cors' });
+          const ct = resp.headers.get('content-type') || '';
+          if (!resp.ok || !ct.includes('application/json')) return;
+
+          const data = await resp.json();
+          termsList.innerHTML = '';
+          if (Array.isArray(data)) {
+            data.forEach(item => {
+              const val = typeof item === 'string'
+                ? item
+                : (item.term || item.name || JSON.stringify(item));
+              if (!val) return;
+              const opt = document.createElement('option');
+              opt.value = val;
+              termsList.appendChild(opt);
+            });
+          }
+        } catch {
+          /* 忽略自動完成失敗，不影響主要功能 */
+        }
+      }
+
+      window.addEventListener('load', populateTermSuggestions);
+      baseInput.addEventListener('change', populateTermSuggestions);
+    </script>
+  </body>
 </html>
 
